@@ -1,0 +1,295 @@
+---
+title: "Machine Learning Week 4 Assignment"
+output: html_document
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = F)
+```
+
+
+##### Date: 12 Nov 2016
+
+
+
+#### **1.Goal of Assignment**
+
+6 participants in a study were asked to perform barbell lifts correctly and incorrectly in 5 different ways. Data were collected from accelerometers attached to the belt, forearm, arm, and the dumbell they were using.
+
+Our goal is to predict the manner in which they did the exercise (the "classe" variable) using the data recorded on 20 different test cases (the "test set").
+
+
+#### **2.Data Source & Data Structure**
+
+The training and test data were downloaded from the course website. 
+
+The training set comprises 19622 observations and 160 variables, while the test set has the same dimensions as the former, except the 'classe' variable in the former is replaced by 'problem_id'.
+
+The summary of the training datasets is presented in the Appendix.
+
+
+#### **3.Data Processing**
+
+The training and testing data are processed via the following steps:
+
+1. Convert 'classe' variable (i.e. the response variable) in the training data to 'factor' class
+
+2. Extract all the numeric and integer columns
+
+3. Manually remove unnecessary variables: num_window, raw_timestamp_part_2, raw_timestamp_part_1
+
+4. Run preProcess() 'bagImpute' method to fill in missing NAs
+
+5. Sample 5000 observations from the training set. This is to prevent exceeding the memory limit of the computer used in running this test (4 GB RAM). 
+
+
+
+#### **4.Machine Learning Algorithms**
+
+```{r, echo=F, message=F}
+library( data.table )
+library( caret )
+library( e1071 )
+library( stringr )
+
+if( !file.exists( "dttr2.rds" ) )  # Chk if intermediate files have been generated and saved
+{
+  dttr <- fread( "pml-training.csv" )
+  dtte <- fread( "pml-testing.csv" )
+  
+  
+  # Change response 'classe' to factor
+  dttr[ , classe := as.factor( classe )]
+  
+  
+  # Extract all numeric and integer col
+  a_colnm <- colnames( dttr )
+  a_sCol <- NULL
+  
+  for( col in a_colnm )
+  {
+    if( is.numeric( dttr[[ col ]] ) == T | is.integer( dttr[[ col ]] ) == T )
+      a_sCol <- append( col, a_sCol )
+  }
+  
+  
+  # Manually remove unwanted cols
+  a_UnwantCol1 <- a_sCol[ str_detect( a_sCol, "(var|stddev|avg)" ) ]
+  a_UnwantCol <- c( "num_window", "raw_timestamp_part_2", "raw_timestamp_part_1",
+                    a_UnwantCol1 )
+  
+  a_sCol <- a_sCol[ !(a_sCol %in% a_UnwantCol ) ]
+  
+  
+  # Bind classe to selected Col Nm
+  a_sCol2 <- c( a_sCol, "classe" )
+  
+  
+  # Extract selected col into Training & Testing data
+  dttr2 <- dttr[ , a_sCol2, with = F ]
+  dtte2 <- dtte[ , a_sCol, with = F ]
+  
+  
+  # Fill in NAs in training data
+  # Credit: http://mkseo.pe.kr/stats/?p=719
+  
+  NofCol <- ncol( dttr2 ) - 1
+  preProc <- preProcess( dttr2[ , 1:NofCol, with = F ], method = "bagImpute" )
+  
+  dttr2 <- predict( preProc, dttr2 )
+  dtte2 <- predict( preProc, dtte2 )
+  
+  
+  # Sample 5000 observations from dataset for training
+  set.seed( 1 )
+  ind <- sample( 1:19622, 5000, replace = F )
+  dttr2 <- dttr2[ ind, ]
+
+}else
+{
+  dttr2 <- readRDS( "dttr2.rds" )
+  dtte2 <- readRDS( "dtte2.rds" )
+}
+
+
+
+# define training control
+# See: SO: Applying k-fold Cross Validation model using caret package
+train_control<- trainControl( method = "cv", number = 10 )
+
+# Train model using RF
+set.seed( 1 )
+if( file.exists( "rf_fit.rds" ) )
+{
+  rf <- readRDS( "rf_fit.rds" )
+} else
+{
+  rf <- train( classe ~ ., data = dttr2, method = "rf", trControl=train_control )
+}
+
+
+# Train using GBM
+set.seed( 1 )
+if( file.exists( "rf_fit.rds" ) )
+{
+  gbm <- readRDS( "rf_fit.rds" )
+} else
+{
+  gbm <- train( classe ~ ., data=dttr2, method = "gbm", trControl=train_control )
+}
+
+
+# Run on predicting data
+a_pred <- predict( rf, dtte2 )
+dtte <- fread( "pml-testing.csv" )
+df_pred <- data.frame( ID = dtte$problem_id, Prediction = a_pred )
+
+```
+
+
+The Random Forest ("RF") and GBM methods are used in this assignment with **cross-validation set to 10-folds**.
+
+The results for the RF training run are as follow:
+
+```{r, echo=F, comment=""}
+print( rf )
+```
+
+
+The results for the GBM training run are as follow:
+
+```{r, echo=F, comment=""}
+print( gbm )
+
+```
+
+
+#### **5.Results & Conclusions**
+
+As shown above, the RF algorithm has a higher accuracy at **97.2%** versus GBM's 95.3%. The former is used to predict the 'classe' for the testing set:
+
+```{r, echo = F}
+df_pred
+```
+
+
+#### **6.Future Research & Improvements**
+
+Future implementations of this assignment should be run on a computer with higher memory (ideally >8GB). Once this limitation is resolved, the following can be implemented to improve the accuracy:
+
+- Increase the train set to 8000 observations
+- Have a 'ensemble' set comprising 5000 observations. As the name implies, this is to train an ensemble after running RF and GBM (and possibly other algorithms)
+- Have a 'validation' set to test the ensemble before apply the model to the actual prediction data
+
+
+
+### **APPENDIX**
+
+Figure 1: Summary of Training Data
+
+```{r, echo=F, comment=""}
+dttr <- fread( "pml-training.csv" )
+str(dttr, list.len = 1000)
+```
+
+
+Figure 2: R Code
+```{r, eval = F, echo=T}
+library( data.table )
+library( caret )
+library( e1071 )
+library( stringr )
+
+dttr <- fread( "pml-training.csv" )
+dtte <- fread( "pml-testing.csv" )
+
+
+# Change response 'classe' to factor
+dttr[ , classe := as.factor( classe )]
+
+
+# Extract all numeric and integer col
+a_colnm <- colnames( dttr )
+a_sCol <- NULL
+
+for( col in a_colnm )
+{
+  if( is.numeric( dttr[[ col ]] ) == T | is.integer( dttr[[ col ]] ) == T )
+    a_sCol <- append( col, a_sCol )
+}
+
+
+# Manually remove unwanted cols
+a_UnwantCol1 <- a_sCol[ str_detect( a_sCol, "(var|stddev|avg)" ) ]
+a_UnwantCol <- c( "num_window", "raw_timestamp_part_2", "raw_timestamp_part_1",
+                  a_UnwantCol1 )
+
+a_sCol <- a_sCol[ !(a_sCol %in% a_UnwantCol ) ]
+
+
+# Bind classe to selected Col Nm
+a_sCol2 <- c( a_sCol, "classe" )
+
+
+# Extract selected col into Training & Testing data
+dttr2 <- dttr[ , a_sCol2, with = F ]
+dtte2 <- dtte[ , a_sCol, with = F ]
+
+
+# Remove unneeded obj to save memory
+rm( dttr, dtte ); gc()
+
+
+# Fill in NAs in training data
+# See: http://mkseo.pe.kr/stats/?p=719
+
+NofCol <- ncol( dttr2 ) - 1
+preProc <- preProcess( dttr2[ , 1:NofCol, with = F ], method = "bagImpute" )
+
+dttr2 <- predict( preProc, dttr2 )
+dtte2 <- predict( preProc, dtte2 )
+
+
+# Sample 5000 observations from dataset for training
+set.seed( 1 )
+ind <- sample( 1:19622, 5000, replace = F )
+dttr2 <- dttr2[ ind, ]
+
+
+# define training control
+# Credit: SO: Applying k-fold Cross Validation model using caret package
+train_control<- trainControl( method = "cv", number = 10 )
+
+# Train model using RF
+set.seed( 1 )
+rf <- train( classe ~ ., data = dttr2, method = "rf", trControl=train_control )
+gc()
+
+
+# Train using GBM
+set.seed( 1 )
+gbm <- train( classe ~ ., data = dttr2, method = "gbm", trControl=train_control )
+gc()
+
+
+# Examine accuracy of each method
+rf
+gbm
+
+
+# Apply rf model to testing set
+a_pred <- predict( rf, dtte2 )
+df_pred <- data.frame( ID = dtte$problem_id, Prediction = a_pred )
+
+
+
+## Housekeeping code
+# saveRDS( rf, "rf_fit.rds" )
+# saveRDS( gbm, "gbm_fit.rds" )
+
+```
+
+
+
+
+
